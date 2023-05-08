@@ -1,0 +1,117 @@
+---
+title: "Untitled"
+author: "Mike Kraft"
+date: "4/4/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ISLR)
+library(boot)
+library(tidyverse)
+library(FNN)
+library(class)
+library(MASS)
+library(rstanarm)
+library(leaps)
+library(glmnet)
+library(caret)
+heart <- read.csv('heart.csv')
+head(heart)
+dim(heart)
+#sum(heart$target == 1) / nrow(heart)
+```
+# Target is the response variable for Model 1
+
+# 0 for "thal" = NA
+
+## Linear model for question 2: What variables are most significant in predicting Age (Age variable is response) - Linear Regression
+# I will now split up the data frame into a training and testing data set so that we can train the models on the training data and then eventually make preditions with our best model, on the testing data.
+
+```{r}
+set.seed(24)
+split_pct <- 0.75
+n <- length(heart$age)*split_pct # train size
+row_samp <- sample(1:length(heart$age), n, replace = FALSE)
+train <- heart[row_samp,]
+test <- heart[-row_samp,]
+```
+
+## FULL MODEL
+```{r}
+set.seed(24)
+lin_model1 <- lm(age ~ ., data = train)
+summary(lin_model1)
+```
+I will now run another linear model which excludes all statistically insignificant predictor variables (variables with a p-value of greater than 0.05).
+
+## Updated linear model that has all predictors + (slope:oldpeak) interaction term
+
+```{r}
+set.seed(24)
+lin_model2 <- lm(age ~ sex+cp+trestbps+chol+fbs+restecg+thalach+exang+(slope:oldpeak)+ca+thal+target, data = train)
+summary(lin_model2)
+```
+As we can see here, this reduced model has an even worse Adjusted R-squared than the initial model. I will now check the correlations between the predictors in the full model.
+
+```{r}
+cor(train)
+```
+The highest correlation between all of the variables is between the "slope" and "oldpeak" variables, because of this, I will remove the slope predictor due to collinearity. I could have removed either the slope or oldpeak predictors because of collinearity, but since the oldpeak predictor is more correlated with age than the slope predictor is, I will remove slope.
+
+## Updated linear model that contains all predictors except slope
+
+```{r}
+set.seed(24)
+lin_model3 <- lm(age ~ sex+trestbps+chol+fbs+restecg+thalach+exang+ca+cp+oldpeak+thal+target, data = train)
+summary(lin_model3)
+```
+
+## Updated linear model that contains statistically significant predictors (which will remove both of our collinear terms since they are not significant)
+
+```{r}
+set.seed(24)
+lin_model4 <- lm(age ~ sex+trestbps+chol++restecg+thalach+ca, data = train)
+summary(lin_model4)
+```
+
+## Residual diagnostics for model3 
+
+```{r}
+par(mfrow=c(2,2))
+plot(lin_model3)
+boxcox(lin_model3)
+```
+
+
+# We will now make predictions of model3 on our testing data since model3 was found to be our best model that was trained on our training data (has the highest adjusted r-squared value of .3088).
+
+
+```{r}
+set.seed(24)
+age_pred <- predict(lin_model3, newdata = test)
+test_error_rate <- test$age - age_pred
+rmse_test <- sqrt(mean(test_error_rate^2))
+rmse_test
+```
+The rmse measures the average distance between the predicted values from the model, and the actual values in the testing data, the lower the rmse, the better the model.
+So it is fair to say that realistically, this high rmse is reasonable because based off of even several biological conditions, it can be easy to guess a patients age off by about 8 years.
+
+
+Which to choose???:
+
+Model with all predictors + (slope:oldpeak) interaction term => adjusted r-squared = 0.2890    THIS IS MODEL 2
+(slope:oldpeak) p-value = 0.0169 
+
+Model with all predictors - slope => adjusted r-squared = 0.2843   THIS IS MODEL 3  THIS IS OUR BEST MODEL (subjectively... explain)
+oldpeak p-value = 0.3986
+
+Model with only statistically significant predictors => adjusted r-squared = 0.2790    THIS IS MODEL 4
+
+
+** NOTE: VALUES MIGHT BE SLIGHTLY DIFFERENT THAN OUR VALUES IN THE SLIDESHOW. THE SLIDESHOW VALUES WERE BEFORE I HAD SET A SEED IN EACH APPROPRIATE CODE CHUNK.**
+
