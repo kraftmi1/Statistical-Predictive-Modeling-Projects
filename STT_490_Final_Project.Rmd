@@ -1,0 +1,136 @@
+---
+title: "STT_490_Final_Project"
+author: "Mike Kraft"
+date: "3/27/2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Topic: The topic of my project is being able to build an effective linear regression model to aid the infamous Walmart in predicting their weekly sales, based solely off of outside economic factors.
+
+## Introduction: My data set is information taken from 45 different Walmart stores across the United States from February, 2010 to October, 2012. As it is stated on Kaggle, "The business is facing a challenge due to unforeseen demands and runs out of stock some times, due to the inappropriate machine learning algorithm". To help solve this issue, I will need to use conditional economic factors to help predict weekly sales, such as: Consumer Price Index (CPI), Unemployment rates, mean cost of fuel in that region, and much more. With these factors, I will create an accurate model that predicts weekly sales well. As it is also stated on Kaggle, "Walmart runs several promotional markdown events throughout the year. These markdowns precede prominent holidays, the four largest of all, which are the Super Bowl, Labour Day, Thanksgiving, and Christmas". The data set includes the weeks with which a holiday fell upon, so because of this, we can use holiday weeks in helping build our model that will predict weekly sales.
+
+# I will first import a few libraries and load in my full data set. I will then check the dimensions of my data set and check to see if there are any NA values, which would mean that I would have to do some cleaning of my data.
+
+```{r}
+library(MASS)
+library(leaps)
+walmart <- read.csv('Walmart.csv')
+head(walmart)
+dim(walmart)
+
+any(is.na(walmart)) #checking to see if there are any NA values in the data set
+sum(walmart$Holiday_Flag == 1)
+```
+There appears to be no NA values in my data set, which is great, meaning that for every different variable (column), there is a respective value in each of the 6435 rows, hence, there is no missing data! I will now clearly define the weeks for which there was the Super Bowl, Labor Day, Thanksgiving, and Christmas for the years 2010-2012.
+
+## Exploratory Data Analysis:
+
+# The "Store" variable is an integer 1-45, indicating the store number. (Will be dropping this column)
+# The "Date" variable is the current week of sales for each respective row. (Will be dropping this column)
+# The "Weekly_Sales" variable is our response variable, which indicates the weekly sales, in dollars, for each respective store, for each respective week.
+# "Holiday_Flag" is binary variable that yields a 1 for a holiday week, and a 0 for any other week.
+# A holiday week is defined as: 
+  Super Bowl: (The week of): Feb 12th, 2010; Feb 11th, 2011; Feb 10th, 2012;
+  Labor Day: (The week of): September 10th, 2010; September 9th, 2011; September 7th, 2012;
+  Thanksgiving: (The week of): November 26th, 2010; November 25th, 2011;
+  Christmas: (The week of): December 25, 2010; December 25, 2011;
+# The "Temperature" predictor variable is the mean temperature of that week, in that store's region, in degrees farenheit.
+# The "Fuel_Price" predictor variable represents the mean cost of gasoline of that week, in that store's region, in dollars.
+# The "CPI" predictor variable represents the "Prevailing consumer price index"(see Kaggle link at bottom of document) of that week, in dollars.
+# The "Unemployment" predictor variable represents the national unemployment rate for that given week.
+
+  
+Among the 45 different stores, with each store going through 10 holiday weeks within this 2 year span, we are left with a total of 450 holiday weeks between all 45 stores summed together. I will not create 4 different dummy-variables for each of the different holidays included in the data, simply due to how little the proportion of holidays are in the data, relative to the total amount of rows (6,435 total rows with only 450 total rows being a holiday week). That being said, the 450 different holiday weeks in this data set yield a value of 1 in the "Holiday_Flag" column, and if a given week was not a holiday week (just under 6,000 of the rows of data), this will be represented will a value of 0 in the "Holiday_Flag" column.
+
+# Since the topic is predicting weekly sales for Walmart stores, we first need to clean the data by dropping the "Store" and "Date" columns since they will not aid in predicting the "Weekly_Sales" response variable. I am doing this so that we can build a model that generally can predict weekly sales, not necessarily based upon the region or location of each of the 45 given stores. I will not be predicting the weekly sales for each of the different 45 different stores, so I will drop the "Store" column. I will also drop the "Date" column 
+
+```{r}
+#unique(walmart$Store)
+walmart <- walmart[-c(1,2)]
+#walmart
+```
+
+
+# I will first fit a full linear regression model of the data, with the weekly sales as our response.
+
+```{r}
+set.seed(24)
+weekly_model <- lm(Weekly_Sales ~. , data = walmart)
+summary(weekly_model)
+```
+As it can be seen, the adjusted r-squared value is very very bad. I now hope to make improvements to the model to increase this terrible adjusted r-squared value in the full model.
+
+# In repair of this model, I will first check the residual diagnostics for the full model
+```{r}
+par(mfrow=c(2,2))
+plot(weekly_model)
+boxcox(weekly_model)
+```
+Based on the residual diagnostics for this full model, and the boxcox plot, it seems as though we need a log transformation on our response variable because of our non-normally distributed residuals, and the fact that our lambda value is close to zero.
+
+# Full linear regression model with a log transformation on the response.
+```{r}
+set.seed(24)
+weekly_model2 <- lm(log(Weekly_Sales) ~. , data = walmart)
+summary(weekly_model2)
+```
+As it can be seen, this transformation actually made our adjusted r-squared value even worse! I will now check the residual diagnostics of this model to see how they compare to that of the full model.
+
+# Residual diagnostics for this log-transformed model
+```{r}
+par(mfrow=c(2,2))
+plot(weekly_model2)
+boxcox(weekly_model2)
+```
+As it can be seen, our residuals have become even more non-normally distributed! In addition, the lambda value on the boxcox plot went way in the other direction, yielding us with a lambda value of greater than 2! This is very bad, as we are likely overfitting our model upon our data. Instead of a log transformation, instead I will try a square-root transformation and then check the accompanying residual diagnostics.
+
+# Full linear regression model with a square root transformation on the response.
+```{r}
+set.seed(24)
+weekly_model3 <- lm(sqrt(Weekly_Sales) ~. , data = walmart)
+summary(weekly_model3)
+```
+Although our adjusted r-squared value is higher (better) than that of the log-transformed model, it is still a worse adjusted r-squared value than that of the full model with no transformation on the response. That being said, we will continue with no transformation on the response. I will now check the correlation between variables to check for collinearity between predictors.
+
+# Correlations between variables
+```{r}
+cor(walmart)
+```
+Since none of the predictor variables are very correlated with each other, we do not have to worry about any sort of collinearity in our model! I will now test an interaction effect between the "Unemployment" and "CPI" predictors since even though they are not extremely correlated with each other, they have the highest correlation between any two of the predictors.
+
+# Full model with interaction term between Unemployment and CPI
+```{r}
+set.seed(24)
+weekly_model4 <- lm(Weekly_Sales ~ Holiday_Flag+Temperature+Fuel_Price+(CPI:Unemployment) , data = walmart)
+summary(weekly_model4)
+```
+Wow! This model yields us the worst adjusted r-squared value between all 4 models with a value of 0.0194. I did not want to do this because of the limited amount of predictors in this data set but in my last attempt to improve this model, I will remove the "Fuel_Price" predictor since it is the only statistically insignificant predictor from our full model that has no response transformation, within a 90% confidence interval.
+
+# Full model with no response transformation, but the Fuel_Price predictor is now dropped
+```{r}
+set.seed(24)
+weekly_model5 <- lm(Weekly_Sales ~ Holiday_Flag+Temperature+CPI+Unemployment , data = walmart)
+summary(weekly_model5)
+```
+Alas! This model has an adjusted r-squared value that is slightly (.00008) better than that of the full model with no response transformation. I will now check the residual diagnostics of this model, as it is going to be our best model.
+
+# Residual diagnostics for this full model, that has no transformation on the response, and has the Fuel_Price predictor dropped.
+```{r}
+par(mfrow=c(2,2))
+plot(weekly_model5)
+boxcox(weekly_model5)
+```
+The residual diagnostics are about what I expected, they look almost identical to the diagnostics of the full model with no transformation on the response, which means that this is still a bad model, with non-normally distributed residuals.
+
+
+## Conclusion/Discussion: Overall, it can pretty much be seen by any of the five models above, that these predictors are horrible at predicting weekly sales accurately. I kind of expected this, as all of these predictors are not internal factors of a Walmart store, such as produce sales, clothing sales, etc. My best model, which is the full linear regression model that excludes the "Fuel_Price" predictor and has no transformation on the response variable has an adjusted r-squared value of 0.02477. This confirms that this model, even though it is our best model between the five, is still a really inaccurate model. In the future, it might be useful to have a named location for each respective store so that I could perhaps predict the weekly sales for each geographical region. This modeling method could very well be a better way to approach predicting weekly sales based solely on outside economic factors. Lastly, besides the region being added to the data set, like I mentioned in the previous sentence, the data set itself was pretty good. The data set had no NA values, and had almost 6,500 rows of data to model with.
+
+
+
+## Link to Kaggle data set: https://www.kaggle.com/datasets/yasserh/walmart-dataset
