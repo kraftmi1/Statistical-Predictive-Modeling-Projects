@@ -1,0 +1,683 @@
+---
+title: "STT_481_Final_Project"
+author: "Mike Kraft"
+date: "4/24/2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Intro to the data and the problem: This data set is full of 79 total predictor variables, and with the SalePrice as the response variable, of a population of homes in Ames, Iowa.
+
+# Raw data: Before the data set was pre-processed, the data included 79 different predictor variables, with various different quantitative and qualitative variables. These predictors describe different qualities of a house, such as: number of half-bathrooms, material of the roof, height of the basement, and much more.
+
+# Data Cleaning: I took the pre-processed data from our professor.
+
+## Loading in the data and libraries
+```{r}
+library(ISLR)
+library(boot)
+library(tidyverse)
+library(FNN)
+library(class)
+library(MASS)
+library(rstanarm)
+library(leaps)
+library(glmnet)
+library(gam)
+library(tree)
+library(randomForest)
+library(gbm)
+train_new <- read.csv('train_new.csv')
+test_new <- read.csv('test_new.csv')
+#train_new
+#test_new
+
+Id <- seq(1461,2919)
+```
+## KNN METHOD (20%)
+
+# First, I will scale the data so that the different weights of the data are the same.
+
+```{r}
+all_data <- rbind(train_new, test_new)
+scaled_data <- scale(all_data[, -ncol(all_data)])
+X_train <- scaled_data[1:nrow(train_new),]
+X_test <- scaled_data[-(1:nrow(train_new)),]
+y_train <- train_new$SalePrice
+```
+
+
+# Second, I will test different candidates for the tuning parameter k in KNN. In the following code chunk is the function from HW 3 to calculate the KNN CV MSEs. By using this function, I loop through multiple k nearest neighbors values to find the one with the lowest Cross Validation Mean Squared Error. For each KNN K, there will be 10-fold cross validation that is imposed upon it, and then the respective CV MSE will be calculated.
+
+```{r}
+set.seed(24)
+fold_index <- cut(sample(1:nrow(X_train)), breaks=10, labels=FALSE)
+K_vector <- seq(1,25,1)
+error_k <- rep(0, length(K_vector))
+counter <- 0
+for(k in K_vector){
+  counter <- counter + 1 # counter for error.k
+  mse <- rep(0,10) # initialize an mse object to record the MSE for each fold
+  for(i in 1:10){
+    pred.out <- knn.reg(X_train[fold_index!=i,], X_train[fold_index==i,], train_new$SalePrice[fold_index!=i], k=k)
+    mse[i] <- mean((pred.out$pred - train_new$SalePrice[fold_index==i])**2)
+}
+  error_k[counter] <- sum(mse)/10
+}
+plot(K_vector, error_k, type="b", xlab="K", ylab="10-fold CV")
+
+error_k[which.min(error_k)] # The error at the K with the lowest 10-fold training MSE
+```
+Based upon the plot above, the K=4 k nearest neighbor tuning parameter has the lowest training CV MSE of 1297108553.
+
+
+# I will now perform predictions on the test data with the model that I chose at K = 4.
+
+```{r}
+k_4_predictions <- knn.reg(train = X_train, test=X_test, y = y_train, k=4)$pred
+k_4_cvmse <- error_k[which.min(error_k)]
+k_4_cvmse
+k_4_predictions[1:10]
+```
+
+#### WRITE CSV
+# I will now make a submission file for kaggle for my KNN predictions
+
+```{r}
+#knn.prediction.df <- as.data.frame(cbind(Id, k_4_predictions))
+#colnames(knn.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(knn.prediction.df, file = 'KNN_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+## LINEAR REGRESSION (20%)
+
+
+# First, I will check the significant predictors
+```{r}
+model1 <- lm(SalePrice ~ .,data=train_new)
+summary(model1)
+```
+
+
+# Here are the residual diagnostics of this first model:
+
+```{r}
+par(mfrow=c(2,2))
+plot(model1)
+```
+Based on the above Normal Q-Q plot, it appears as though there is some non-normality in our residuals of our full model.
+
+# Normality assumption check:
+
+```{r}
+boxcox(model1)
+cor(train_new)
+```
+In this boxcox plot, we can see that since the lambda value is very close to 0, we need to log-transform our response.
+
+# Log-transformed response linear model and residual diagnostics check:
+
+```{r}
+model2 <- lm(log(SalePrice) ~ .,data=train_new)
+par(mfrow=c(2,2))
+plot(model2)
+summary(model2)
+```
+Based on the above Normal Q-Q plot, it can now be seen that our residuals are much closer to normal than before the log transformation on the response. We can now create a better linear regression model from this information by using the same transformation on the response, but by removing the statistically insignificant predictors (predictors with a p-value of greater than 0.05).
+
+
+
+# I will now create a new linear model of only predictors that are statistically signinficant (p-value of less than 0.05).
+
+```{r}
+model3 <- lm(log(SalePrice) ~ LotArea+OverallQual+OverallCond+YearBuilt+YearRemodAdd+BsmtFinSF1+BsmtFinSF2+BsmtUnfSF
+             +X1stFlrSF+X2ndFlrSF+BsmtFullBath+FullBath+HalfBath+KitchenAbvGr+TotRmsAbvGrd+Fireplaces+GarageCars+WoodDeckSF,data=train_new)
+summary(model3)
+```
+As you can see above, when comparing the log-transformed model with all of the predictors, and then the log-transformed model with only the statistically significant predictors, the adjusted R-squared is only 0.0001 different.
+
+# Significant coefficients:
+The interpretation behind the statistically significant predictors is that for each coefficient (beta) on each predictor, you need to raise it to the e power for each unit increase in the predictor, while holding every other predictor variable fixed. For example, for one unit increase in the "FullBath" variable, the SalePrice is increased by e^(3.669e-02) units.
+
+# Prediction on Linear model
+
+```{r}
+model3.predictions <- exp(predict(model3,test_new))
+#model3.predictions[1:12]
+```
+
+# Cross Validation on linear model
+
+```{r}
+set.seed(24)
+glm.fit <- glm(log(SalePrice) ~ LotArea+OverallQual+OverallCond+YearBuilt+YearRemodAdd+BsmtFinSF1+BsmtFinSF2+BsmtUnfSF
+             +X1stFlrSF+X2ndFlrSF+BsmtFullBath+FullBath+HalfBath+KitchenAbvGr+TotRmsAbvGrd+Fireplaces+GarageCars+WoodDeckSF,data=train_new)
+cv.errors <- cv.glm(train_new, glm.fit,K = 10) #K-fold K
+lmcvfit <- cv.errors$delta[2]
+lmcvfit
+```
+Here we can see that the Cross Validation Mean Squared Error for the linear model, with all of the insignificant predictors removed, and the log-transformed response is approximately 0.0246.
+
+
+#### WRITE CSV for linear regression
+```{r}
+#linear.prediction.df <- as.data.frame(cbind(Id, model3.predictions))
+#colnames(linear.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(linear.prediction.df, file = 'Linear_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+## Subset Selection (20%)
+
+
+# I need to find the best subset among the three following methods: "Best Subset", "Forward Stepwise", and "Backward Stepwise".
+
+
+# First, I will try the "Best Subset" subset selection method and print the summary. I will include the log transformation on SalePrice (our response) since that is the transformation that we initially had for our Linear Regression model.
+
+```{r}
+set.seed(24)
+best_subset_model <- regsubsets(log(SalePrice) ~ . ,nvmax=23, data = train_new)
+#
+best_subset_summary <- summary(best_subset_model)
+#summary(best_subset_model)
+#names(best_subset_summary)
+#best_subset_summary$rss
+
+```
+
+
+# Second, I will try the "Forward Stepwise" subset selection method and print the summary.
+
+```{r}
+set.seed(24)
+forward_subset_model <- regsubsets(log(SalePrice) ~ . , data = train_new, nvmax = 23, method = "forward")
+forward_subset_summary <- summary(forward_subset_model)
+#summary(forward_subset_model)
+```
+
+
+# Third, I will try the "Backward Stepwise" subset selection method and print the summary.
+
+```{r}
+set.seed(24)
+backward_subset_model <- regsubsets(log(SalePrice) ~ . , data = train_new, nvmax = 23, method = "backward")
+backward_subset_summary <- summary(backward_subset_model)
+#summary(backward_subset_model)
+```
+
+
+# I will plot the RSS, adjusted R^2, Cp, and BIC for the "best subset" subset selection model, as well as the coefficient estimates associated with this model.
+
+```{r}
+par(mfrow=c(2,2))
+plot(best_subset_summary$rss ,xlab="Number of Variables ", ylab="RSS", type="l")
+plot(best_subset_summary$adjr2 ,xlab="Number of Variables ", ylab="Adjusted RSq", type="l")
+which.max(best_subset_summary$adjr2)
+points(20,best_subset_summary$adjr2[20], col = "red", cex = 2, pch = 20)
+plot(best_subset_summary$cp, xlab = "Number of Variables ", ylab = "Cp", type = "l")
+which.min(best_subset_summary$cp)
+points(18,best_subset_summary$cp[18], col = "red", cex = 2, pch = 20)
+which.min(best_subset_summary$bic)
+plot(best_subset_summary$bic, xlab = "Number of Variables ", ylab = "BIC", type = "l")
+points(12,best_subset_summary$bic[12], col = "red", cex = 2, pch = 20)
+```
+
+```{r}
+coef(best_subset_model, 6)
+```
+Here are the first 6 coefficient estimates for the best subset selection model.
+
+# I will plot the RSS, adjusted R^2, Cp, and BIC for the "forward stepwise" subset selection model, as well as the coefficient estimates associated with this model.
+
+```{r}
+par(mfrow=c(2,2))
+plot(forward_subset_summary$rss ,xlab="Number of Variables ", ylab="RSS", type="l")
+plot(forward_subset_summary$adjr2 ,xlab="Number of Variables ", ylab="Adjusted RSq", type="l")
+which.max(forward_subset_summary$adjr2)
+points(20, forward_subset_summary$adjr2[20], col = "red", cex = 2, pch = 20)
+plot(forward_subset_summary$cp, xlab = "Number of Variables ", ylab = "Cp", type = "l")
+which.min(forward_subset_summary$cp)
+points(18,forward_subset_summary$cp[18], col = "red", cex = 2, pch = 20)
+which.min(forward_subset_summary$bic)
+plot(forward_subset_summary$bic, xlab = "Number of Variables ", ylab = "BIC", type = "l")
+points(12,forward_subset_summary$bic[12], col = "red", cex = 2, pch = 20)
+```
+
+```{r}
+coef(forward_subset_model, 6)
+```
+Here are the first 6 coefficient estimates for the forward stepwise subset selection model.
+
+# I will plot the RSS, adjusted R^2, Cp, and BIC for the "backward stepwise" subset selection model, as well as the coefficient estimates associated with this model.
+
+```{r}
+par(mfrow=c(2,2))
+plot(backward_subset_summary$rss ,xlab="Number of Variables ", ylab="RSS", type="l")
+plot(backward_subset_summary$adjr2 ,xlab="Number of Variables ", ylab="Adjusted RSq", type="l")
+which.max(backward_subset_summary$adjr2)
+points(20, backward_subset_summary$adjr2[20], col = "red", cex = 2, pch = 20)
+plot(backward_subset_summary$cp, xlab = "Number of Variables ", ylab = "Cp", type = "l")
+which.min(backward_subset_summary$cp)
+points(18,backward_subset_summary$cp[18], col = "red", cex = 2, pch = 20)
+which.min(backward_subset_summary$bic)
+plot(backward_subset_summary$bic, xlab = "Number of Variables ", ylab = "BIC", type = "l")
+points(12,backward_subset_summary$bic[12], col = "red", cex = 2, pch = 20)
+```
+
+```{r}
+coef(backward_subset_model, 6)
+```
+
+Here are the first 6 coefficient estimates for the backward stepwise subset selection model.
+
+Overall, I am getting identical results for the Cp, BIC, and Adjusted R-squared in all three of my subset selection models. The best number of predictors for each criterion are as follows: Adjusted R-squared is 20, Cp is 18, and BIC is 12. Therefore, I ended up choosing the Best Subset for my prediction when I really could have chosen any of the three subsets. If I were to have a lower number of predictors for one of the three subset methods, I would have chosen that subset method.
+
+
+# Cross Validation estimation on each of the three subsets
+
+```{r}
+# Function from R lab
+predict.regsubsets <- function (object, newdata , id, ...){
+  form <- as.formula(object$call[[2]])  # formula of null model
+  mat <- model.matrix(form, newdata)    # building an "X" matrix from newdata
+  coefi <- coef(object, id = id)        # coefficient estimates associated with the object model containing id non-zero variables
+  xvars <- names(coefi)            # names of the non-zero coefficient estimates
+  return(mat[,xvars] %*% coefi)    # X[,non-zero variables] %*% Coefficients[non-zero variables]
+}
+
+```
+
+
+```{r}
+set.seed(24)
+
+fold.index <- cut(sample(1:nrow(train_new[,-1])), breaks=10, labels=FALSE)
+
+cv.error.best.fit <- rep(0,ncol(train_new[,-1]))
+cv.error.forward.fit <- rep(0,ncol(train_new[,-1]))
+cv.error.backward.fit <- rep(0,ncol(train_new[,-1]))
+
+
+for(i in 1:ncol(train_new[,-ncol(train_new)])){   
+  # cat("i=", i,"\n") 
+  
+  best_error <- rep(0, 10)
+  forward_error <- rep(0, 10)
+  backward_error <- rep(0, 10)
+  
+  for (k in 1:10){
+    training_fold <- train_new[fold.index != k,]
+    testing_fold <- train_new[fold.index == k,]
+    true.y <- testing_fold[,"SalePrice"]
+    
+    best_subset_model <- regsubsets(log(SalePrice) ~ . ,nvmax=23, data = training_fold)
+    forward_subset_model <- regsubsets(log(SalePrice) ~ . , data = training_fold, nvmax = 23, method = "forward")
+    backward_subset_model <- regsubsets(log(SalePrice) ~ . , data = training_fold, nvmax = 23, method = "backward")
+
+    best_subset_pred <- exp(predict(best_subset_model,testing_fold,id=i))
+    forward_subset_pred <- exp(predict(forward_subset_model,testing_fold,id=i))
+    backward_subset_pred <- exp(predict(backward_subset_model,testing_fold,id=i))
+
+    best_error[k] <- mean((best_subset_pred - true.y)^2)
+    forward_error[k] <- mean((forward_subset_pred - true.y)^2)
+    backward_error[k] <- mean((backward_subset_pred - true.y)^2)
+  }
+  cv.error.best.fit[i] <- mean(best_error)
+  cv.error.forward.fit[i] <- mean(forward_error)
+  cv.error.backward.fit[i] <- mean(backward_error)
+}
+print(c('Best subset CV Error:', cv.error.best.fit[which.min(cv.error.best.fit)], 'Coef num:', which.min(cv.error.best.fit)))
+print(c('Forward subset CV Error:', cv.error.forward.fit[which.min(cv.error.forward.fit)], 'Coef num:', which.min(cv.error.forward.fit)))
+print(c('Backward subset CV Error:', cv.error.backward.fit[which.min(cv.error.backward.fit)], 'Coef num:', which.min(cv.error.backward.fit)))
+```
+The CV MSE for all three of the subset selection methods is 2082411863.25332. For some reason, the code yields a minimal CV MSE with only 1 predictor.
+
+
+# Next, I will calculate the predictions for each of the three subset selection methods 
+
+```{r}
+best_sub_pred <- exp(predict.regsubsets(object = best_subset_model,newdata = test_new, id = which.min(cv.error.best.fit)))
+#best_sub_pred[1:10]
+forward_sub_pred <- exp(predict.regsubsets(object = forward_subset_model,newdata = test_new, id = which.min(cv.error.forward.fit)))
+#forward_sub_pred[1:10]
+backward_sub_pred <- exp(predict.regsubsets(object = backward_subset_model,newdata = test_new, id = which.min(cv.error.backward.fit)))
+#backward_sub_pred[1:10]
+```
+
+
+#### WRITE CSV for Subset Selection
+```{r}
+#subset.prediction.df <- as.data.frame(cbind(Id, best_sub_pred))
+#colnames(subset.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(subset.prediction.df, file = 'Best_Subset_Selection_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+
+## Shrinkage Methods (20%)
+
+# I will start with computing the Ridge Regression model and the Lasso Regression model
+
+```{r}
+X <- model.matrix(SalePrice ~., data=train_new)[,-1]
+y <- log(train_new$SalePrice)
+ridge_model <- glmnet(X,y , alpha = 0)
+lasso_model <- glmnet(X,y , alpha = 1)
+
+```
+
+# Next is the 10-fold cross validation for the ridge regression model, the best lambda value, and the coefficient estimates with the best lambda value. 
+
+```{r}
+set.seed(24)
+cv_ridge <- cv.glmnet(X, y, alpha = 0, nfolds = 10)
+plot(cv_ridge)
+ridge_bestlam <- cv_ridge$lambda.min
+ridge_bestlam
+#coef(ridge_model, s = ridge_bestlam)
+#cv_ridge
+
+cvmse_ridge <- cv_ridge$cvm[which.min(cv_ridge$cvm)]
+cvmse_ridge
+```
+
+# Next is the 10-fold cross validation for the lasso regression model, the best lambda value, the coefficient estimates with the best lambda value, and the cross validation MSE. 
+
+```{r}
+set.seed(24)
+cv_lasso <- cv.glmnet(X, y, alpha = 1, nfolds = 10)
+plot(cv_lasso)
+lasso_bestlam <- cv_lasso$lambda.min
+lasso_bestlam
+#coef(lasso_model, s = lasso_bestlam)
+#cv_lasso
+
+cvmse_lasso <- cv_lasso$cvm[which.min(cv_lasso$cvm)]
+cvmse_lasso
+```
+The cross validation MSE for the ridge regression model is 0.02450574, and the cross validation MSE for the lasso model is 0.02502826.
+
+In terms of tuning parameters, the lambda value produced by the ridge regression model is approximately 0.04734258, and the lambda value for the lasso regression model is approximately 0.002146928. The reason why this lambda for ridge regression is so low is because since the penalty term is (lambda x (sum(coefficients^2))) and since our coefficients are so small (barely greater than zero), squaring them will yield an even smaller number, so to make them as small as possible, we multiply each respective value by a small lambda value. On the contrary, since the penalty term for lasso regression is only (lambda x abs(coefficients)), we don't need such a large lambda value to compensate for the small coefficient terms.
+
+In terms of model interpretation, both models are pretty similar, as no coefficients actually reach zero in the Lasso model (which would make the Lasso more interpretable than the Ridge model).
+
+
+# Next is the predictions against our test data for Ridge and Lasso Regression
+```{r}
+test_matrix_lasso_ridge <- model.matrix(SalePrice ~ ., data=test_new)[,-1]
+ridge_prediction <- exp(predict(ridge_model, s = ridge_bestlam, newx = test_matrix_lasso_ridge))
+#ridge_prediction[1:10]
+
+lasso_prediction <- exp(predict(lasso_model, s = lasso_bestlam, newx = test_matrix_lasso_ridge))
+#lasso_prediction[1:10]
+
+```
+
+
+
+#### WRITE CSV for Ridge Regression
+```{r}
+#ridge.prediction.df <- as.data.frame(cbind(Id, ridge_prediction))
+#colnames(ridge.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(ridge.prediction.df, file = 'Ridge_Regression_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+#### WRITE CSV for Lasso Regression
+```{r}
+#lasso.prediction.df <- as.data.frame(cbind(Id, lasso_prediction))
+#colnames(lasso.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(lasso.prediction.df, file = 'Lasso_Regression_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+## Computed CV MSE's are listed at the end of each given section
+
+# KNN: 1297108553
+# Linear Regression: 0.02464019
+# (Best) Subset Selection: 2082411863.25332
+# Ridge Regression: 0.02450574
+# Lasso Regression: 0.02502826
+
+
+## Kaggle True Test Mean Squared Errors:
+
+# KNN: 0.17553
+# Linear Regression: 0.15083
+# (Best) Subset Selection: 0.22895
+# Ridge Regression: 0.15508
+# Lasso Regression: 0.15165
+
+
+##### ****I WILL NOW BEGIN THE NEW MODELING****
+
+
+
+I will first fit a GAM on the training data, using log(Salary) as the response and all of the features as the predictors. I will output the summary.
+
+```{r}
+head(train_new)
+gam_model <- gam(log(SalePrice) ~ s(LotArea) + s(OverallQual) + s(OverallCond) + s(YearBuilt) + s(YearRemodAdd) + s(BsmtFinSF1) + s(BsmtFinSF2) + s(BsmtUnfSF) + s(X1stFlrSF) + s(X2ndFlrSF) + s(LowQualFinSF) + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + s(BedroomAbvGr) + s(KitchenAbvGr) + s(TotRmsAbvGrd) + s(Fireplaces) + s(GarageCars) + s(GarageArea) + s(WoodDeckSF) + MoSold, data = train_new, )
+par(mfrow = c(2,2))
+plot(gam_model, se=T, col="blue")
+summary(gam_model)
+
+gam_model_preds <- exp(predict(gam_model, test_new))
+gam_model_mse <- mean((gam_model_preds - test_new$SalePrice)**2)
+gam_model_mse
+```
+It can be seen that there are linear trends for many of the predictor variables. I didn't run the spline function s() on any of the qualitative predictors. I will now try the spline function on only the predictors that are non-linear since fitting the spline function on the linear-trending predictors is overfitting. The CV MSE for this model is 36982074475.
+
+I will now run the updated GAM model.
+
+```{r}
+gam_model2 <- gam(log(SalePrice) ~ s(LotArea,df=3) + OverallQual + OverallCond + YearBuilt + YearRemodAdd + s(BsmtFinSF1,df=6) + BsmtFinSF2 + s(BsmtUnfSF,df=6) + s(X1stFlrSF,df=3) + s(X2ndFlrSF,df=6) + LowQualFinSF + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + s(BedroomAbvGr,df=6) + KitchenAbvGr + s(TotRmsAbvGrd,df=3) + Fireplaces + GarageCars + s(GarageArea,df=3) + WoodDeckSF + MoSold, data = train_new, )
+#par(mfrow = c(2,2))
+#plot(gam_model2, se=T, col="blue")
+#summary(gam_model2)
+
+gam_model2_preds <- exp(predict(gam_model2, test_new))
+gam_model2_mse <- mean((gam_model2_preds - test_new$SalePrice)**2)
+gam_model2_mse
+```
+The MSE for this model is 36140203894. After testing several different df parameters this yielded the lowest CV MSE.
+
+#### WRITE CSV for GAM
+```{r}
+#gam.prediction.df <- as.data.frame(cbind(Id, gam_model2_preds))
+#colnames(gam.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(gam.prediction.df, file = 'GAM_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+
+I will now fit a tree to the training data, with SalePrice as the response and all of the other variables as predictors
+
+```{r}
+set.seed(24)
+decision_tree <- tree(SalePrice ~ ., data=train_new)
+summary(decision_tree)
+```
+The decision tree has 12 terminal nodes. 
+
+
+I will now give a detailed output of the decision tree.
+
+```{r}
+decision_tree
+```
+
+
+I will now create a plot of the tree, and interpret the results.
+
+```{r}
+plot(decision_tree)
+text(decision_tree, pretty = 0)
+```
+At the far left terminal node, we are left with a value of 121000. This represents the mean value of all data samples that have a OverallQual value of less than 6.5, and a GarageCars value of less than 1.5. Since there are 12 terminal nodes, it can get extensive to lay out exactly what conditions each leaf falls under. That being said, the continuous value that is accommodated with each leaf represents the mean SalePrice for each observation given the conditions that are above the given leaf. For example, if there were 30 observations that fall under the first leaf (OverallQual < 6.5 and GarageCars < 1.5), the mean SalePrice of those 30 observations is 121,000.
+
+I will now make predictions of the response on the test data.
+
+```{r}
+decision_tree_preds <- predict(decision_tree, test_new)
+mean((decision_tree_preds-test_new$SalePrice)**2)
+```
+The test MSE here is 37959706613.
+
+I will now use the cv.tree() function to the training set in order to determine the optimal tree size.
+
+```{r}
+decision_tree_cv <- cv.tree(decision_tree)
+decision_tree_cv$size[which.min(decision_tree_cv$dev)]
+```
+The optimal tree size is with 12 terminal nodes!
+
+I will now produce a plot that visually represents the CV MSE for each number of terminal nodes.
+
+```{r}
+plot(decision_tree_cv$size, decision_tree_cv$dev)
+```
+
+Technically the 12-leaf tree has the lowest CV error, but the 5, 9, 10, and even 11 leaf trees have very close CV error to that of the 12-leaf tree.
+
+I will now produce a pruned tree to see what the optimal number of terminal nodes is for my decision tree.
+
+```{r}
+pruned_tree <- prune.tree(decision_tree)
+pruned_tree$size[which.min(pruned_tree$dev)] #leaf size of the pruned tree which yields the lowest CV MSE
+```
+12 leaves is the optimal number!
+
+#### WRITE CSV for Regression Tree
+```{r}
+#decision.tree.prediction.df <- as.data.frame(cbind(Id, decision_tree_preds))
+#colnames(decision.tree.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(decision.tree.prediction.df, file = 'Tree_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+
+I will now fit a bagging model to the training set, with 1,000 trees (ntree = 1000). I will also use the importance() function to determine which variables are most important.
+
+```{r}
+set.seed(24) # Consistency!
+bagging_model <- randomForest(SalePrice~., data = train_new, ntree = 1000, mtry = ncol(train_new)-1, importance = TRUE)
+
+importance(bagging_model)
+
+varImpPlot(bagging_model)
+```
+
+With respect to MSE, the OverallQual, X2ndFlrSF, and X1stFlrSF predictors have the highest values, when included in the given decision tree. With respect to node purity, the OverallQual predictor is by far the most important, with all of the other predictors being a lot less important than the OverallQual predictor variable.
+
+I will now use the bagging model to predict the response on the test data, and will compute the test MSE.
+
+```{r}
+bagging_preds <- predict(bagging_model, test_new)
+mean((bagging_preds-test_new$SalePrice)**2)
+```
+
+
+#### WRITE CSV for Bagging Model
+```{r}
+#bagging.prediction.df <- as.data.frame(cbind(Id, bagging_preds))
+#colnames(bagging.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(bagging.prediction.df, file = 'Bagging_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+
+I will now fit a random forest model to the training set. I will again use 1,000 trees (ntree = 1000), but will now specify the mtry parameter to be the square root of all of the predictors. I will also use the importance() function to determine which variables are most important.
+
+```{r}
+set.seed(24) # Consistency!!
+randforest_model <- randomForest(SalePrice~., data = train_new, ntree = 1000, mtry = sqrt(ncol(train_new) - 1), importance = TRUE)
+
+importance(randforest_model)
+
+varImpPlot(randforest_model)
+```
+Here we have an interesting output. With respect to MSE, the OverallQual, X2ndFlrSF, and X1stFlrSF predictors have the highest values, when included in the given decision tree, though these three predictors are now much closer to all of the other predictors than in the bagging model. With respect to node purity, the OverallQual predictor is by far the most important, with all of the other predictors being a lot less important than the OverallQual predictor variable, just like as we saw in the bagging model visualizations.
+
+I will now use the random forest model to predict the response on the test data, and will compute the test MSE.
+
+```{r}
+randforest_preds <- predict(randforest_model, test_new)
+mean((randforest_preds-test_new$SalePrice)**2)
+```
+
+#### WRITE CSV for Random Forest Model
+```{r}
+#randforest.prediction.df <- as.data.frame(cbind(Id, randforest_preds))
+#colnames(randforest.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(randforest.prediction.df, file = 'Random_Forest_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+I will now fit a boosting model to the training set. I will use 1,000 trees, and a shrinkage value of 0.01 (λ = 0.01).
+
+```{r}
+set.seed(24) # Consistency
+
+boosting_model <- gbm(SalePrice~., data = train_new, shrinkage = 0.05, n.tree = 1000, interaction.depth = 4, cv.folds = 10)
+
+summary(boosting_model)
+```
+It seems as though the OverallQual and X1stFlrSF predictors have the most influence upon the SalePrice. The OverallQual predictor is pretty much in a league of its own in terms of influence upon the SalePrice.
+
+I will now use the boosting model to predict the response on the test data.
+
+```{r}
+boosting_preds <- predict(boosting_model, test_new, n.trees=which.min(boosting_model$cv.error))
+
+mean((boosting_preds-test_new$SalePrice)**2)
+```
+37384355794
+
+#### WRITE CSV for Boosting Model
+```{r}
+#boosting.prediction.df <- as.data.frame(cbind(Id, boosting_preds))
+#colnames(boosting.prediction.df) <- c('Id', 'SalePrice')
+#write.csv(boosting.prediction.df, file = 'Boosting_Model_Predictions_Final_Project.csv', row.names = FALSE)
+```
+#### WRITE CSV
+
+# Hypothesis: Before submitting to Kaggle, i think that my GAM model will perform the best because for each predictor that does not have a linear relationship with SalePrice, will now be tuned accordingly for higher polynomial relationships.
+
+# Hypothesis Conclusion: My hypothesis was correct! My Kaggle true test MSE for my GAM model was 0.13515, which was my lowest error rate of all of my models.
+
+# Worst Model: After submitting to Kaggle, my Decision Tree model performed the worst, with a true test MSE of 0.24341.
+
+# Discussion of Best and Worst models: I think that my GAM model performed the best because of the same reasons as in my hypothesis, because for each predictor that does not have a linear relationship with SalePrice, will now be tuned accordingly for higher polynomial relationships. I think that my decision tree performed the worst because even though my pruned decision tree had 12 terminal nodes, I think that my tree was still not specific enough, to really distinctify how expensive or cheap a SalePrice on a house would be, with how many predictor variables we had to work with.
+
+# Conclusion: In conclusion, when you have a large data set that has many different predictors, a GAM model can become very useful as it is likely that some of your predictor variables have a higher-order-polynomial relationship with the response variable.
+
+# Further question(s): How might exterior economic factors, such as unemployment rate or oil prices, influence the sale price of a house in addition to the variables included in this data set?
+
+## Computed Test MSE's are listed at the end of each given section:
+
+GAM: 36140203894
+Regression (Decision) Tree: 37959706613
+Bagging: 37086175407
+Random Forest: 37026280094
+Boosting: 37384355794
+
+## Kaggle True Test Mean Squared Errors:
+
+GAM: 0.13515
+Regression (Decision) Tree: 0.24341
+Bagging: 0.15312
+Random Forest: 0.15255
+Boosting: 0.15328
+
+
+
+
+
