@@ -1,2 +1,2 @@
 # Statistical-Predictive-Modeling-Projects
-See ReadMe file for description of Repository
+Included in this Repository are some of my personal projects that include different statistical and predictive modeling methods.
